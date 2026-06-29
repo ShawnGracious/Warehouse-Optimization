@@ -18,6 +18,7 @@ from config import (
     DEFAULT_AREAS, DEFAULT_ORDER_TYPES,
 )
 from engine import WarehouseEngine
+import database as db
 
 st.set_page_config(
     page_title="Warehouse Capacity Planner",
@@ -155,8 +156,9 @@ def csv_bytes_to_order_types(file_bytes) -> list:
     return result
 
 if "areas" not in st.session_state:
-    st.session_state.areas       = [copy.deepcopy(a) for a in DEFAULT_AREAS]
-    st.session_state.order_types = [copy.deepcopy(o) for o in DEFAULT_ORDER_TYPES]
+    _loaded_areas, _loaded_orders = db.load_all()
+    st.session_state.areas       = [copy.deepcopy(a) for a in _loaded_areas]
+    st.session_state.order_types = [copy.deepcopy(o) for o in _loaded_orders]
 
 def get_engine():
     return WarehouseEngine(
@@ -171,6 +173,11 @@ with st.sidebar:
     page = st.radio("Navigate",
         ["📦 Analysis", "🏭 Material flow", "⚙️ Settings"],
         label_visibility="collapsed")
+    st.markdown("---")
+    if db.is_db_configured():
+        st.caption("🟢 Connected to database — changes persist")
+    else:
+        st.caption("⚪ No database configured — changes are session-only")
     st.markdown("---")
     st.markdown("**Quick status at x1.0**")
     _snap = get_engine().snapshot(1.0)
@@ -576,6 +583,14 @@ if page == "⚙️ Settings":
             ot.kitting_split  = KittingSplit(packout_pct=u["packout_pct"],  kitting_pct=u["kitting_pct"])
 
         st.success("Settings saved.")
+        if db.is_db_configured():
+            saved_ok = db.save_all(st.session_state.areas, st.session_state.order_types)
+            if saved_ok:
+                st.success("✅ Saved to database — values will persist across sessions.")
+            else:
+                st.warning("⚠️ Saved locally but database write failed — check the error above.")
+        else:
+            st.info("ℹ️ No database configured — values are session-only and will reset on refresh. See README to set up Supabase.")
         st.rerun()
 
     st.markdown("---")
@@ -632,6 +647,31 @@ if page == "⚙️ Settings":
         "Tip: download both files to keep a backup of a scenario. "
         "To restore it later, upload both CSVs and click Apply for each."
     )
+
+    st.markdown("---")
+    st.subheader("🗄️ Database controls")
+    if db.is_db_configured():
+        st.success("Database connected — Save & recalculate above also writes here automatically.")
+        dbc1, dbc2 = st.columns(2)
+        with dbc1:
+            if st.button("🔄 Reload from database", use_container_width=True):
+                _areas, _orders = db.load_all()
+                st.session_state.areas = _areas
+                st.session_state.order_types = _orders
+                st.success("Reloaded from database.")
+                st.rerun()
+        with dbc2:
+            if st.button("↩️ Reset to factory defaults", use_container_width=True):
+                st.session_state.areas = [copy.deepcopy(a) for a in DEFAULT_AREAS]
+                st.session_state.order_types = [copy.deepcopy(o) for o in DEFAULT_ORDER_TYPES]
+                db.save_all(st.session_state.areas, st.session_state.order_types)
+                st.success("Reset to defaults and saved to database.")
+                st.rerun()
+    else:
+        st.warning(
+            "No database connected. Values only persist for this browser session. "
+            "See README.md for the one-time Supabase setup (free, ~5 minutes)."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
