@@ -58,7 +58,7 @@ with st.sidebar:
     st.markdown("## ⬡ Warehouse Planner")
     st.markdown("---")
     page = st.radio("Navigate",
-        ["📊 Analysis", "🔄 Material flow", "⚙️ Settings"],
+        ["📦 Analysis", "🏭 Material flow", "⚙️ Settings"],
         label_visibility="collapsed")
     st.markdown("---")
     st.markdown("**Quick status at x1.0**")
@@ -84,116 +84,182 @@ with st.sidebar:
 #  MATERIAL FLOW PAGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if page == "🔄 Material flow":
-    st.title("🔄 Material flow")
+if page == "🏭 Material flow":
+    st.title("🏭 Material flow")
     st.caption("How material moves through the warehouse — from inbound to final shipment.")
 
     def make_flow_diagram(engine):
+        """
+        Improved flow diagram using scatter traces for proper connected arrows.
+        Layout (x, y in data coords 0-100):
+          Row 1 (y=90): Inbound Orders (centre)
+          Row 2 (y=70): 600-Paper (left), 400-Consumables (right)
+          Row 3 (y=50): SmartBulk (left), 300-CS1 (centre-left), 200-CS2 (right)
+          Row 4 (y=30): Kitting-300 (centre-left), Kitting-200 (right)
+          Row 5 (y=10): 100-Final (centre)
+        """
         snap = engine.snapshot(1.0)
         fl   = snap.flow
         fig  = go.Figure()
 
-        # nodes: x, y, label, sublabel, text_color, bg_color, border_color
-        nodes = [
-            (0.50, 0.95, "Inbound Orders",      "",                  "#a0a8f0", "#1e2235", "#4f6ef7"),
-            (0.18, 0.75, "600 - Paper",          "Raw paper storage", "#a0a8f0", "#1a2040", "#4f6ef7"),
-            (0.82, 0.75, "400 - Consumables",    "Raw consumables",   "#67d8f0", "#0a2025", "#06b6d4"),
-            (0.18, 0.55, "Smart Bulk",           "Paper staging",     "#b8a8f8", "#1e1540", "#7c5cfc"),
-            (0.50, 0.55, "300 - Cust. Spec 1",  "Customer area 1",   "#6ee7b7", "#0a2018", "#10b981"),
-            (0.82, 0.55, "200 - Cust. Spec 2",  "Customer area 2",   "#fcd34d", "#2a1800", "#f59e0b"),
-            (0.50, 0.35, "Kitting (300 path)",  "Custom kits",       "#9ca3af", "#111827", "#6b7280"),
-            (0.82, 0.35, "Kitting (200 path)",  "Custom kits",       "#9ca3af", "#111827", "#6b7280"),
-            (0.50, 0.10, "100 - Final/Packout", "Ready to ship",     "#fca5a5", "#2a0a0a", "#ef4444"),
-        ]
-        for x, y, label, sub, tc, bg, bc in nodes:
-            body = "<b>" + label + "</b>"
-            if sub:
-                body = body + "<br><span style='font-size:11px;color:#9ca3af'>" + sub + "</span>"
-            fig.add_annotation(
-                x=x, y=y, text=body, showarrow=False, align="center",
-                font=dict(size=13, color=tc), bgcolor=bg,
-                bordercolor=bc, borderwidth=2, borderpad=10,
-                xref="paper", yref="paper")
+        # ── coordinate system: 0-100 x, 0-100 y ─────────────────────────
+        # node centres
+        N = {
+            "orders":  (50, 90),
+            "z600":    (22, 70),
+            "z400":    (78, 70),
+            "smb":     (22, 50),
+            "z300":    (48, 50),
+            "z200":    (78, 50),
+            "kit300":  (48, 30),
+            "kit200":  (78, 30),
+            "final":   (50, 10),
+        }
 
-        # arrows: x0, y0, x1, y1, color
-        arrows = [
-            (0.50, 0.93, 0.18, 0.78, "#4f6ef7"),
-            (0.50, 0.93, 0.82, 0.78, "#06b6d4"),
-            (0.18, 0.72, 0.18, 0.58, "#7c5cfc"),
-            (0.18, 0.52, 0.18, 0.16, "#7c5cfc"),
-            (0.18, 0.13, 0.40, 0.13, "#7c5cfc"),
-            (0.82, 0.72, 0.50, 0.58, "#10b981"),
-            (0.82, 0.72, 0.82, 0.58, "#f59e0b"),
-            (0.50, 0.52, 0.50, 0.38, "#10b981"),
-            (0.82, 0.52, 0.82, 0.38, "#f59e0b"),
-            (0.43, 0.35, 0.43, 0.52, "#6b7280"),
-            (0.89, 0.35, 0.89, 0.52, "#6b7280"),
-            (0.50, 0.52, 0.47, 0.13, "#10b981"),
-            (0.82, 0.52, 0.53, 0.13, "#f59e0b"),
-        ]
-        for x0, y0, x1, y1, color in arrows:
-            fig.add_shape(type="line",
-                x0=x0, y0=y0, x1=x1, y1=y1,
-                xref="paper", yref="paper",
-                line=dict(color=color, width=2))
-            fig.add_annotation(
-                x=x1, y=y1, ax=0, ay=0,
-                xref="paper", yref="paper",
-                showarrow=True, arrowhead=2, arrowsize=1.2,
-                arrowwidth=2, arrowcolor=color, text="")
+        def add_arrow(x0, y0, x1, y1, color, dash="solid", width=2):
+            """Draw a line + arrowhead using scatter + annotation."""
+            fig.add_trace(go.Scatter(
+                x=[x0, x1], y=[y0, y1], mode="lines",
+                line=dict(color=color, width=width, dash=dash),
+                hoverinfo="skip", showlegend=False))
+            # arrowhead: small marker at end styled as triangle
+            import math
+            dx, dy = x1-x0, y1-y0
+            length = math.sqrt(dx*dx + dy*dy) or 1
+            # place marker slightly back from tip so it looks centred
+            mx = x1 - dx/length*1.5
+            my = y1 - dy/length*1.5
+            angle = math.degrees(math.atan2(dy, dx))
+            fig.add_trace(go.Scatter(
+                x=[x1], y=[y1], mode="markers",
+                marker=dict(
+                    symbol="arrow", size=14, color=color,
+                    angle=angle - 90,
+                    line=dict(width=0)),
+                hoverinfo="skip", showlegend=False))
 
-        # edge labels: x, y, text, color
-        elabels = [
-            (0.28, 0.87, "Paper % (Split 1)",      "#4f6ef7"),
-            (0.72, 0.87, "Consumable % (Split 1)", "#06b6d4"),
-            (0.07, 0.34, "Direct to packout",      "#7c5cfc"),
-            (0.61, 0.67, "Cust 1 % (Split 2)",     "#10b981"),
-            (0.88, 0.66, "Cust 2 % (Split 2)",     "#f59e0b"),
-            (0.57, 0.46, "Kitting % (Split 3)",    "#10b981"),
-            (0.88, 0.46, "Kitting % (Split 3)",    "#f59e0b"),
-            (0.33, 0.44, "back to 300",             "#6b7280"),
-            (0.93, 0.44, "back to 200",             "#6b7280"),
-        ]
-        for lx, ly, ltxt, lc in elabels:
+        def add_node(x, y, title, subtitle, tc, bg, bc, w=18, h=7):
+            """Draw a rounded rectangle node."""
+            # shadow/glow
+            fig.add_shape(type="rect",
+                x0=x-w/2+0.4, y0=y-h/2-0.4,
+                x1=x+w/2+0.4, y1=y+h/2-0.4,
+                xref="x", yref="y",
+                fillcolor="rgba(0,0,0,0.4)", line=dict(width=0))
+            # main box
+            fig.add_shape(type="rect",
+                x0=x-w/2, y0=y-h/2,
+                x1=x+w/2, y1=y+h/2,
+                xref="x", yref="y",
+                fillcolor=bg,
+                line=dict(color=bc, width=2))
+            # title
             fig.add_annotation(
-                x=lx, y=ly, text="<i>" + ltxt + "</i>",
-                showarrow=False, font=dict(size=10, color=lc),
-                xref="paper", yref="paper", align="center")
+                x=x, y=y + (1.2 if subtitle else 0),
+                text="<b>" + title + "</b>",
+                showarrow=False, font=dict(size=13, color=tc),
+                xref="x", yref="y", align="center")
+            if subtitle:
+                fig.add_annotation(
+                    x=x, y=y - 1.8,
+                    text="<span style='font-size:10px;color:#9ca3af'>" + subtitle + "</span>",
+                    showarrow=False, font=dict(size=10, color="#9ca3af"),
+                    xref="x", yref="y", align="center")
 
-        # rule labels on left: y, title, detail
-        rules = [
-            (0.90, "SPLIT 1", "600 vs 400 storage"),
-            (0.64, "RULE 2",  "Paper to SmartBulk, direct to 100"),
-            (0.57, "SPLIT 2", "300 vs 200 customer"),
-            (0.38, "SPLIT 3", "Kitting loop returns to zone"),
-            (0.11, "RULE 5",  "All paths converge at 100"),
-        ]
-        for ry, rtitle, rdetail in rules:
+        def edge_label(x, y, text, color, size=10):
             fig.add_annotation(
-                x=-0.01, y=ry,
-                text="<b>" + rtitle + "</b><br>"
-                     + "<span style='color:#9ca3af;font-size:10px'>" + rdetail + "</span>",
-                showarrow=False, font=dict(size=11, color="#6b7280"),
-                xref="paper", yref="paper", align="right", xanchor="right")
+                x=x, y=y, text="<i>" + text + "</i>",
+                showarrow=False, font=dict(size=size, color=color),
+                xref="x", yref="y", align="center",
+                bgcolor="rgba(15,17,23,0.75)", borderpad=2)
 
-        # live volume callouts
+        def rule_badge(x, y, badge, detail, color):
+            fig.add_annotation(
+                x=x, y=y,
+                text="<b>" + badge + "</b>  <span style='color:#6b7280;font-size:10px'>" + detail + "</span>",
+                showarrow=False, font=dict(size=11, color=color),
+                xref="x", yref="y", align="left",
+                bgcolor="rgba(15,17,23,0.8)",
+                bordercolor=color, borderwidth=1, borderpad=4)
+
+        # ── nodes ────────────────────────────────────────────────────────
+        add_node(*N["orders"], "Inbound Orders",     "",                    "#c7d2fe", "#1e2235", "#4f6ef7", w=20, h=6)
+        add_node(*N["z600"],   "600 – Paper",        "Raw paper storage",   "#a0a8f0", "#1a2040", "#4f6ef7")
+        add_node(*N["z400"],   "400 – Consumables",  "Raw consumables",     "#67d8f0", "#0a2025", "#06b6d4")
+        add_node(*N["smb"],    "Smart Bulk",         "Paper staging",       "#c4b5fd", "#1e1540", "#7c5cfc")
+        add_node(*N["z300"],   "300 – Cust. Spec 1", "Customer area 1",     "#6ee7b7", "#0a2018", "#10b981")
+        add_node(*N["z200"],   "200 – Cust. Spec 2", "Customer area 2",     "#fcd34d", "#2a1800", "#f59e0b")
+        add_node(*N["kit300"], "Kitting",            "Custom kit assembly", "#d1d5db", "#111827", "#6b7280", w=16, h=6)
+        add_node(*N["kit200"], "Kitting",            "Custom kit assembly", "#d1d5db", "#111827", "#6b7280", w=16, h=6)
+        add_node(*N["final"],  "100 – Final/Packout","Ready to ship",       "#fca5a5", "#2a0a0a", "#ef4444", w=24, h=6)
+
+        # ── arrows ───────────────────────────────────────────────────────
+        # Inbound → 600
+        add_arrow(50, 87, 22, 73.5, "#4f6ef7")
+        # Inbound → 400
+        add_arrow(50, 87, 78, 73.5, "#06b6d4")
+        # 600 → Smart Bulk
+        add_arrow(22, 66.5, 22, 53.5, "#7c5cfc")
+        # Smart Bulk → Final (direct bypass, dashed)
+        add_arrow(11, 50, 11, 10, "#7c5cfc", dash="dot", width=1.5)
+        add_arrow(11, 10, 38, 10, "#7c5cfc", dash="dot", width=1.5)
+        # 400 → 300
+        add_arrow(65, 70, 56, 53.5, "#10b981")
+        # 400 → 200
+        add_arrow(78, 66.5, 78, 53.5, "#f59e0b")
+        # 300 → Kitting
+        add_arrow(48, 46.5, 48, 33.5, "#10b981")
+        # 200 → Kitting
+        add_arrow(78, 46.5, 78, 33.5, "#f59e0b")
+        # Kitting 300 loop back to 300 (via left side)
+        add_arrow(40, 30, 40, 50, "#6b7280", dash="dash", width=1.5)
+        # Kitting 200 loop back to 200 (via right side)
+        add_arrow(86, 30, 86, 50, "#6b7280", dash="dash", width=1.5)
+        # 300 → Final
+        add_arrow(44, 46.5, 44, 13.5, "#10b981")
+        # 200 → Final
+        add_arrow(78, 46.5, 56, 13.5, "#f59e0b")
+
+        # ── edge labels ──────────────────────────────────────────────────
+        edge_label(34, 82,   "Paper % (Split 1)",        "#4f6ef7")
+        edge_label(66, 82,   "Consumable % (Split 1)",   "#06b6d4")
+        edge_label(22, 60,   "staged",                   "#7c5cfc")
+        edge_label(8,  30,   "direct to 100",           "#7c5cfc")
+        edge_label(59, 63,   "Cust 1 % (Split 2)",      "#10b981")
+        edge_label(83, 60,   "Cust 2 % (Split 2)",       "#f59e0b")
+        edge_label(52, 40,   "Kitting % (Split 3)",     "#10b981")
+        edge_label(82, 40,   "Kitting % (Split 3)",     "#f59e0b")
+        edge_label(37, 40,   "back to 300",              "#6b7280")
+        edge_label(90, 40,   "back to 200",              "#6b7280")
+
+        # ── rule badges ──────────────────────────────────────────────────
+        rule_badge(2, 82, "SPLIT 1", "600 vs 400",           "#818cf8")
+        rule_badge(2, 60, "RULE 2",  "Paper→SmartBulk→100",  "#a78bfa")
+        rule_badge(2, 52, "SPLIT 2", "300 vs 200",           "#34d399")
+        rule_badge(2, 32, "SPLIT 3", "Kitting loop",         "#9ca3af")
+        rule_badge(2, 10, "RULE 5",  "All paths→100",        "#f87171")
+
+        # ── live volume callouts ─────────────────────────────────────────
         fig.add_annotation(
-            x=0.50, y=1.02,
-            text="Smart Bulk: " + str(int(fl.paper_to_smart_bulk)) + " boxes/day",
-            showarrow=False, font=dict(size=11, color="#7c5cfc"),
-            xref="paper", yref="paper", align="center")
-        fig.add_annotation(
-            x=0.70, y=0.63,
-            text="Zn300: " + str(int(fl.consumables_to_300))
-                 + "  |  Zn200: " + str(int(fl.consumables_to_200)) + " boxes/day",
-            showarrow=False, font=dict(size=11, color="#06b6d4"),
-            xref="paper", yref="paper", align="center")
+            x=50, y=96,
+            text="<b>Today at ×1.0:</b>  "
+                 + "Smart Bulk " + str(int(fl.paper_to_smart_bulk)) + " boxes/day  |  "
+                 + "Zn300 " + str(int(fl.consumables_to_300)) + "  |  "
+                 + "Zn200 " + str(int(fl.consumables_to_200)) + " boxes/day",
+            showarrow=False, font=dict(size=11, color="#94a3b8"),
+            xref="x", yref="y", align="center",
+            bgcolor="rgba(30,34,53,0.9)", borderpad=6,
+            bordercolor="#2e3250", borderwidth=1)
 
         fig.update_layout(
-            height=700, margin=dict(l=170, r=20, t=40, b=20),
-            paper_bgcolor="#0f1117", plot_bgcolor="#0f1117",
-            xaxis=dict(visible=False, range=[0, 1]),
-            yaxis=dict(visible=False, range=[0, 1]))
+            height=750,
+            margin=dict(l=10, r=10, t=20, b=10),
+            paper_bgcolor="#0f1117",
+            plot_bgcolor="#0f1117",
+            xaxis=dict(visible=False, range=[0, 100], fixedrange=True),
+            yaxis=dict(visible=False, range=[0, 100], fixedrange=True),
+            showlegend=False,
+        )
         return fig
 
     st.plotly_chart(make_flow_diagram(get_engine()), use_container_width=True)
@@ -355,8 +421,8 @@ if page == "⚙️ Settings":
 #  ANALYSIS PAGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif page == "📊 Analysis":
-    st.title("📊 Analysis")
+elif page == "📦 Analysis":
+    st.title("📦 Analysis")
 
     multiplier = st.slider(
         "Volume multiplier", min_value=1.0, max_value=10.0,
