@@ -73,6 +73,87 @@ def fmt_vol(cuft_value: float, decimals: int = 1) -> str:
     """Format a volume in the current display unit."""
     return f"{to_display(cuft_value):,.{decimals}f} {unit_label()}"
 
+
+# ── CSV save/load for areas and order types ──────────────────────────────────
+import io
+import csv as csv_module
+from datetime import datetime
+
+AREA_FIELDS = [
+    "id", "name", "zone", "volume_cuft", "avg_box_size_cuft",
+    "efficiency", "units_per_box", "is_staging", "max_concurrent_boxes",
+]
+ORDER_FIELDS = [
+    "id", "name", "daily_volume", "avg_units_per_order",
+    "paper_pct", "consumable_pct",
+    "cust1_pct", "cust2_pct",
+    "packout_pct", "kitting_pct",
+]
+
+def areas_to_csv_bytes(areas) -> bytes:
+    buf = io.StringIO()
+    writer = csv_module.writer(buf)
+    writer.writerow(AREA_FIELDS)
+    for a in areas:
+        writer.writerow([
+            a.id, a.name, a.zone, a.volume_cuft, a.avg_box_size_cuft,
+            a.efficiency, a.units_per_box, a.is_staging,
+            a.max_concurrent_boxes if a.max_concurrent_boxes is not None else "",
+        ])
+    return buf.getvalue().encode("utf-8")
+
+def order_types_to_csv_bytes(order_types) -> bytes:
+    buf = io.StringIO()
+    writer = csv_module.writer(buf)
+    writer.writerow(ORDER_FIELDS)
+    for ot in order_types:
+        writer.writerow([
+            ot.id, ot.name, ot.daily_volume, ot.avg_units_per_order,
+            ot.storage_split.paper_pct, ot.storage_split.consumable_pct,
+            ot.customer_split.cust1_pct, ot.customer_split.cust2_pct,
+            ot.kitting_split.packout_pct, ot.kitting_split.kitting_pct,
+        ])
+    return buf.getvalue().encode("utf-8")
+
+def csv_bytes_to_areas(file_bytes) -> list:
+    text = file_bytes.decode("utf-8")
+    reader = csv_module.DictReader(io.StringIO(text))
+    result = []
+    for row in reader:
+        max_b = row.get("max_concurrent_boxes", "")
+        max_b = int(float(max_b)) if max_b not in ("", None) else None
+        result.append(StorageArea(
+            id=row["id"], name=row["name"], zone=row["zone"],
+            volume_cuft=float(row["volume_cuft"]),
+            avg_box_size_cuft=float(row["avg_box_size_cuft"]),
+            efficiency=float(row["efficiency"]),
+            units_per_box=float(row["units_per_box"]),
+            is_staging=(str(row.get("is_staging", "False")).strip().lower() == "true"),
+            max_concurrent_boxes=max_b,
+        ))
+    return result
+
+def csv_bytes_to_order_types(file_bytes) -> list:
+    text = file_bytes.decode("utf-8")
+    reader = csv_module.DictReader(io.StringIO(text))
+    result = []
+    for row in reader:
+        result.append(OrderType(
+            id=row["id"], name=row["name"],
+            daily_volume=int(float(row["daily_volume"])),
+            avg_units_per_order=int(float(row["avg_units_per_order"])),
+            storage_split=StorageSplit(
+                paper_pct=float(row["paper_pct"]),
+                consumable_pct=float(row["consumable_pct"])),
+            customer_split=CustomerSplit(
+                cust1_pct=float(row["cust1_pct"]),
+                cust2_pct=float(row["cust2_pct"])),
+            kitting_split=KittingSplit(
+                packout_pct=float(row["packout_pct"]),
+                kitting_pct=float(row["kitting_pct"])),
+        ))
+    return result
+
 if "areas" not in st.session_state:
     st.session_state.areas       = [copy.deepcopy(a) for a in DEFAULT_AREAS]
     st.session_state.order_types = [copy.deepcopy(o) for o in DEFAULT_ORDER_TYPES]
@@ -496,6 +577,61 @@ if page == "⚙️ Settings":
 
         st.success("Settings saved.")
         st.rerun()
+
+    st.markdown("---")
+    st.subheader("💾 Save / Load configuration (CSV)")
+    st.caption(
+        "Export your current areas and order types to CSV files, or upload "
+        "previously saved CSVs to restore a scenario. Values apply after upload."
+    )
+
+    dl1, dl2 = st.columns(2)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+    with dl1:
+        st.markdown("**Storage areas**")
+        st.download_button(
+            "⬇️ Download areas CSV",
+            data=areas_to_csv_bytes(st.session_state.areas),
+            file_name="warehouse_areas_" + timestamp + ".csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        up_areas = st.file_uploader("⬆️ Upload areas CSV", type=["csv"], key="upload_areas")
+        if up_areas is not None:
+            try:
+                new_areas = csv_bytes_to_areas(up_areas.getvalue())
+                if st.button("Apply uploaded areas", key="apply_areas", use_container_width=True):
+                    st.session_state.areas = new_areas
+                    st.success("Areas loaded from CSV.")
+                    st.rerun()
+            except Exception as e:
+                st.error("Could not parse areas CSV: " + str(e))
+
+    with dl2:
+        st.markdown("**Order types**")
+        st.download_button(
+            "⬇️ Download order types CSV",
+            data=order_types_to_csv_bytes(st.session_state.order_types),
+            file_name="warehouse_order_types_" + timestamp + ".csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        up_orders = st.file_uploader("⬆️ Upload order types CSV", type=["csv"], key="upload_orders")
+        if up_orders is not None:
+            try:
+                new_orders = csv_bytes_to_order_types(up_orders.getvalue())
+                if st.button("Apply uploaded order types", key="apply_orders", use_container_width=True):
+                    st.session_state.order_types = new_orders
+                    st.success("Order types loaded from CSV.")
+                    st.rerun()
+            except Exception as e:
+                st.error("Could not parse order types CSV: " + str(e))
+
+    st.caption(
+        "Tip: download both files to keep a backup of a scenario. "
+        "To restore it later, upload both CSVs and click Apply for each."
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
