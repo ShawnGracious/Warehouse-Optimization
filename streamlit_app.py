@@ -86,182 +86,216 @@ def fmt_vol(cuft_value: float, decimals: int = 1) -> str:
 #   All other columns  → field values (blanks are allowed for optional fields)
 
 import io
-import csv as csv_module
 from datetime import datetime
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
-# Column layout shared by both sections (unused columns are blank per row)
-# Areas table — its own clean header, no blank columns
 AREA_COLS = [
-    "area_id", "area_name", "zone",
-    "volume_cuft", "avg_box_size_cuft", "efficiency", "units_per_box",
-    "is_staging", "max_concurrent_boxes",
+    ("area_id",              "Area ID",            "Unique key - do not change"),
+    ("area_name",            "Area Name",          "Display name - safe to edit"),
+    ("zone",                 "Zone",               "Zone code - do not change unless restructuring"),
+    ("volume_cuft",          "Volume (cu ft)",     "Total cubic feet of the storage area"),
+    ("avg_box_size_cuft",    "Avg Box Size (cu ft)","Average size of one box in cubic feet"),
+    ("efficiency",           "Efficiency (0-1)",   "Usable fraction, e.g. 0.75 = 75% after aisles/racking"),
+    ("units_per_box",        "Units per Box",      "Average units that fit in one box in this area"),
+    ("is_staging",           "Is Staging",         "TRUE or FALSE - leave as-is unless restructuring"),
+    ("max_concurrent_boxes", "Max Concurrent Boxes","Hard cap on boxes worked at once - leave blank for no cap"),
 ]
 
-# Orders table — its own clean header, no blank columns
 ORDER_COLS = [
-    "order_id", "order_name",
-    "daily_volume", "avg_units_per_order",
-    "paper_pct", "consumable_pct",
-    "cust1_pct", "cust2_pct",
-    "packout_pct", "kitting_pct",
+    ("order_id",            "Order ID",            "Unique key - do not change"),
+    ("order_name",          "Order Name",          "Display name - safe to edit"),
+    ("daily_volume",        "Daily Volume",        "Number of orders per day"),
+    ("avg_units_per_order", "Avg Units / Order",   "Average units per order"),
+    ("paper_pct",           "Paper % (600)",       "Must total 100 with Consumable %"),
+    ("consumable_pct",      "Consumable % (400)",  "Must total 100 with Paper %"),
+    ("cust1_pct",           "Cust 1 % (Zone 300)", "Must total 100 with Cust 2 %"),
+    ("cust2_pct",           "Cust 2 % (Zone 200)", "Must total 100 with Cust 1 %"),
+    ("packout_pct",         "Direct to Packout %", "Must total 100 with Kitting %"),
+    ("kitting_pct",         "Kitting %",           "Must total 100 with Direct to Packout %"),
 ]
 
+HEADER_FILL  = PatternFill("solid", start_color="1F2937", end_color="1F2937")
+HEADER_FONT  = Font(color="FFFFFF", bold=True, size=11, name="Calibri")
+SUBLABEL_FONT= Font(color="6B7280", italic=True, size=9, name="Calibri")
+TITLE_FONT   = Font(bold=True, size=16, name="Calibri", color="1F2937")
+SECTION_FONT = Font(bold=True, size=12, name="Calibri", color="4F6EF7")
+BODY_FONT    = Font(size=11, name="Calibri")
+KEY_FILL     = PatternFill("solid", start_color="F3F4F6", end_color="F3F4F6")
+THIN_BORDER  = Border(*[Side(style="thin", color="D1D5DB")] * 4)
 
-def config_to_csv_bytes(areas, order_types) -> bytes:
-    """
-    Build a single CSV with two clean tables stacked vertically:
-      [AREAS] header row + area rows
-      blank line
-      [ORDERS] header row + order rows
-    Each table has only its own relevant columns — no confusing blank cells.
-    """
-    buf = io.StringIO()
-    w = csv_module.writer(buf)
 
-    # ── instructions ─────────────────────────────────────────────────────────
-    w.writerow(["WAREHOUSE CAPACITY PLANNER - CONFIGURATION TEMPLATE"])
-    w.writerow(["Lines starting with # are instructions and are ignored on upload."])
-    w.writerow(["Edit the numbers below in Excel, save as CSV (not xlsx), then upload."])
-    w.writerow([])
-    w.writerow(["# HOW THIS FILE IS ORGANIZED"])
-    w.writerow(["# Table 1 [AREAS]  = storage area settings"])
-    w.writerow(["# Table 2 [ORDERS] = order type settings"])
-    w.writerow(["# Do not rename area_id or order_id values - they are used as keys."])
-    w.writerow(["# Do not add or remove columns. Leave a cell blank only where noted."])
-    w.writerow([])
-    w.writerow(["# AREAS COLUMN GUIDE"])
-    w.writerow(["#   area_id               unique key - do not change"])
-    w.writerow(["#   area_name             display name - safe to edit"])
-    w.writerow(["#   zone                  zone code - do not change unless restructuring"])
-    w.writerow(["#   volume_cuft           total cubic feet of the storage area"])
-    w.writerow(["#   avg_box_size_cuft     average size of one box in cubic feet"])
-    w.writerow(["#   efficiency            usable fraction 0-1, e.g. 0.75 = 75% after aisles/racking"])
-    w.writerow(["#   units_per_box         average units that fit in one box in this area"])
-    w.writerow(["#   is_staging            TRUE or FALSE - leave as-is unless you know what this means"])
-    w.writerow(["#   max_concurrent_boxes  hard cap on boxes worked at once - leave BLANK for no cap"])
-    w.writerow([])
-    w.writerow(["# ORDERS COLUMN GUIDE"])
-    w.writerow(["#   order_id              unique key - do not change"])
-    w.writerow(["#   order_name            display name - safe to edit"])
-    w.writerow(["#   daily_volume          number of orders per day"])
-    w.writerow(["#   avg_units_per_order   average units per order"])
-    w.writerow(["#   paper_pct + consumable_pct        must add up to 100"])
-    w.writerow(["#   cust1_pct + cust2_pct             must add up to 100"])
-    w.writerow(["#   packout_pct + kitting_pct         must add up to 100"])
-    w.writerow([])
+def config_to_excel_bytes(areas, order_types) -> bytes:
+    """Build a formatted .xlsx template: Instructions, Areas, Order Types sheets."""
+    wb = Workbook()
 
-    # ── Table 1: AREAS ───────────────────────────────────────────────────────
-    w.writerow(["[AREAS]"])
-    w.writerow(AREA_COLS)
-    for a in areas:
-        w.writerow([
-            a.id, a.name, a.zone,
-            a.volume_cuft, a.avg_box_size_cuft, a.efficiency, a.units_per_box,
+    # ── Instructions sheet ───────────────────────────────────────────────────
+    ws = wb.active
+    ws.title = "Instructions"
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 95
+
+    ws["A1"] = "WAREHOUSE CAPACITY PLANNER — Configuration Template"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = "Fill in the Areas and Order Types sheets, save the file, then upload it in the app's Settings page."
+    ws["A2"].font = BODY_FONT
+    r = 4
+    for line in [
+        "HOW THIS FILE IS ORGANIZED",
+        "  •  Areas sheet        — physical dimensions for each storage area",
+        "  •  Order Types sheet  — daily volume and percentage splits for each order type",
+        "",
+        "RULES",
+        "  •  Do not rename Area ID or Order ID values — they are used as keys",
+        "  •  Do not add or remove columns",
+        "  •  Paper % + Consumable % must total 100 for every order type",
+        "  •  Cust 1 % + Cust 2 % must total 100 for every order type",
+        "  •  Direct to Packout % + Kitting % must total 100 for every order type",
+        "  •  Max Concurrent Boxes: leave blank if there is no hard cap",
+        "",
+        "TIP",
+        "  •  Download this template anytime from Settings to get your current live values pre-filled.",
+    ]:
+        ws.cell(row=r, column=1, value=line).font = (
+            SECTION_FONT if line and line == line.upper() and not line.startswith(" ") else BODY_FONT
+        )
+        r += 1
+
+    # ── Areas sheet ───────────────────────────────────────────────────────────
+    ws_a = wb.create_sheet("Areas")
+    ws_a.sheet_view.showGridLines = False
+    for col_idx, (_, label, sub) in enumerate(AREA_COLS, start=1):
+        c = ws_a.cell(row=1, column=col_idx, value=label)
+        c.font = HEADER_FONT
+        c.fill = HEADER_FILL
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = THIN_BORDER
+        sub_c = ws_a.cell(row=2, column=col_idx, value=sub)
+        sub_c.font = SUBLABEL_FONT
+        sub_c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws_a.column_dimensions[get_column_letter(col_idx)].width = 22
+    ws_a.row_dimensions[1].height = 32
+    ws_a.row_dimensions[2].height = 28
+    ws_a.freeze_panes = "A3"
+
+    for r_idx, a in enumerate(areas, start=3):
+        values = [
+            a.id, a.name, a.zone, a.volume_cuft, a.avg_box_size_cuft,
+            a.efficiency, a.units_per_box,
             "TRUE" if a.is_staging else "FALSE",
-            a.max_concurrent_boxes if a.max_concurrent_boxes is not None else "",
-        ])
+            a.max_concurrent_boxes if a.max_concurrent_boxes is not None else None,
+        ]
+        for col_idx, val in enumerate(values, start=1):
+            cell = ws_a.cell(row=r_idx, column=col_idx, value=val)
+            cell.font = BODY_FONT
+            cell.border = THIN_BORDER
+            if col_idx == 1:
+                cell.fill = KEY_FILL
 
-    w.writerow([])
+    # TRUE/FALSE dropdown on is_staging column (column 8)
+    dv = DataValidation(type="list", formula1='"TRUE,FALSE"', allow_blank=False)
+    ws_a.add_data_validation(dv)
+    dv.add("H3:H" + str(2 + max(len(areas), 1) + 20))
 
-    # ── Table 2: ORDERS ──────────────────────────────────────────────────────
-    w.writerow(["[ORDERS]"])
-    w.writerow(ORDER_COLS)
-    for ot in order_types:
-        w.writerow([
-            ot.id, ot.name,
-            ot.daily_volume, ot.avg_units_per_order,
+    # ── Order Types sheet ────────────────────────────────────────────────────
+    ws_o = wb.create_sheet("Order Types")
+    ws_o.sheet_view.showGridLines = False
+    for col_idx, (_, label, sub) in enumerate(ORDER_COLS, start=1):
+        c = ws_o.cell(row=1, column=col_idx, value=label)
+        c.font = HEADER_FONT
+        c.fill = HEADER_FILL
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = THIN_BORDER
+        sub_c = ws_o.cell(row=2, column=col_idx, value=sub)
+        sub_c.font = SUBLABEL_FONT
+        sub_c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws_o.column_dimensions[get_column_letter(col_idx)].width = 20
+    ws_o.row_dimensions[1].height = 32
+    ws_o.row_dimensions[2].height = 28
+    ws_o.freeze_panes = "A3"
+
+    for r_idx, ot in enumerate(order_types, start=3):
+        values = [
+            ot.id, ot.name, ot.daily_volume, ot.avg_units_per_order,
             ot.storage_split.paper_pct, ot.storage_split.consumable_pct,
             ot.customer_split.cust1_pct, ot.customer_split.cust2_pct,
             ot.kitting_split.packout_pct, ot.kitting_split.kitting_pct,
-        ])
+        ]
+        for col_idx, val in enumerate(values, start=1):
+            cell = ws_o.cell(row=r_idx, column=col_idx, value=val)
+            cell.font = BODY_FONT
+            cell.border = THIN_BORDER
+            if col_idx == 1:
+                cell.fill = KEY_FILL
 
-    return buf.getvalue().encode("utf-8")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
-def csv_bytes_to_config(file_bytes):
-    """
-    Parse the two-table CSV format produced by config_to_csv_bytes.
-    Looks for [AREAS] and [ORDERS] section markers, reads the header
-    row immediately after each, then reads rows until a blank line
-    or the next section marker.
-    """
-    text = file_bytes.decode("utf-8-sig")  # handles Excel's BOM prefix
-    raw_lines = text.splitlines()
+def excel_bytes_to_config(file_bytes):
+    """Parse the Areas and Order Types sheets from an uploaded .xlsx template."""
+    wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
 
-    def find_section(marker):
-        for i, line in enumerate(raw_lines):
-            if line.strip().upper() == marker:
-                return i
-        return -1
+    if "Areas" not in wb.sheetnames:
+        raise ValueError("Sheet 'Areas' not found. Make sure you uploaded the correct template file.")
+    if "Order Types" not in wb.sheetnames:
+        raise ValueError("Sheet 'Order Types' not found. Make sure you uploaded the correct template file.")
 
-    def read_table(start_idx):
-        """Read header + data rows starting right after the [SECTION] marker."""
-        if start_idx == -1:
-            return []
-        rows_text = []
-        i = start_idx + 1
-        while i < len(raw_lines):
-            line = raw_lines[i]
-            stripped = line.strip()
-            if stripped == "" or stripped.startswith("["):
-                break
-            if not stripped.startswith("#"):
-                rows_text.append(line)
-            i += 1
-        if not rows_text:
-            return []
-        reader = csv_module.DictReader(io.StringIO(chr(10).join(rows_text)))
-        return list(reader)
+    ws_a = wb["Areas"]
+    ws_o = wb["Order Types"]
+    area_keys  = [k for k, _, _ in AREA_COLS]
+    order_keys = [k for k, _, _ in ORDER_COLS]
 
-    area_rows  = read_table(find_section("[AREAS]"))
-    order_rows = read_table(find_section("[ORDERS]"))
-
-    areas, order_types = [], []
-
-    for row in area_rows:
-        max_b = (row.get("max_concurrent_boxes") or "").strip()
-        max_b = int(float(max_b)) if max_b else None
+    areas = []
+    for row in ws_a.iter_rows(min_row=3, values_only=True):
+        if row[0] is None or str(row[0]).strip() == "":
+            continue
+        d = dict(zip(area_keys, row))
+        max_b = d.get("max_concurrent_boxes")
+        max_b = int(float(max_b)) if max_b not in (None, "") else None
         areas.append(StorageArea(
-            id=row["area_id"].strip(),
-            name=row["area_name"].strip(),
-            zone=row["zone"].strip(),
-            volume_cuft=float(row["volume_cuft"]),
-            avg_box_size_cuft=float(row["avg_box_size_cuft"]),
-            efficiency=float(row["efficiency"]),
-            units_per_box=float(row["units_per_box"]),
-            is_staging=(row.get("is_staging","FALSE").strip().upper() == "TRUE"),
+            id=str(d["area_id"]).strip(),
+            name=str(d["area_name"]).strip(),
+            zone=str(d["zone"]).strip(),
+            volume_cuft=float(d["volume_cuft"]),
+            avg_box_size_cuft=float(d["avg_box_size_cuft"]),
+            efficiency=float(d["efficiency"]),
+            units_per_box=float(d["units_per_box"]),
+            is_staging=(str(d.get("is_staging","FALSE")).strip().upper() == "TRUE"),
             max_concurrent_boxes=max_b,
         ))
 
-    for row in order_rows:
+    order_types = []
+    for row in ws_o.iter_rows(min_row=3, values_only=True):
+        if row[0] is None or str(row[0]).strip() == "":
+            continue
+        d = dict(zip(order_keys, row))
         order_types.append(OrderType(
-            id=row["order_id"].strip(),
-            name=row["order_name"].strip(),
-            daily_volume=int(float(row["daily_volume"])),
-            avg_units_per_order=int(float(row["avg_units_per_order"])),
+            id=str(d["order_id"]).strip(),
+            name=str(d["order_name"]).strip(),
+            daily_volume=int(float(d["daily_volume"])),
+            avg_units_per_order=int(float(d["avg_units_per_order"])),
             storage_split=StorageSplit(
-                paper_pct=float(row["paper_pct"]),
-                consumable_pct=float(row["consumable_pct"])),
+                paper_pct=float(d["paper_pct"]),
+                consumable_pct=float(d["consumable_pct"])),
             customer_split=CustomerSplit(
-                cust1_pct=float(row["cust1_pct"]),
-                cust2_pct=float(row["cust2_pct"])),
+                cust1_pct=float(d["cust1_pct"]),
+                cust2_pct=float(d["cust2_pct"])),
             kitting_split=KittingSplit(
-                packout_pct=float(row["packout_pct"]),
-                kitting_pct=float(row["kitting_pct"])),
+                packout_pct=float(d["packout_pct"]),
+                kitting_pct=float(d["kitting_pct"])),
         ))
 
     if not areas:
-        raise ValueError(
-            "No area rows found under [AREAS]. Make sure the [AREAS] marker "
-            "and its header row are intact and not modified."
-        )
+        raise ValueError("No area rows found in the 'Areas' sheet (starting row 3).")
     if not order_types:
-        raise ValueError(
-            "No order rows found under [ORDERS]. Make sure the [ORDERS] marker "
-            "and its header row are intact and not modified."
-        )
+        raise ValueError("No order rows found in the 'Order Types' sheet (starting row 3).")
 
     return areas, order_types
+
 
 if "areas" not in st.session_state:
     _loaded_areas, _loaded_orders = db.load_all()
@@ -702,41 +736,40 @@ if page == "⚙️ Settings":
         st.rerun()
 
     st.markdown("---")
-    st.subheader("💾 Save / Load configuration (CSV)")
+    st.subheader("💾 Save / Load configuration (Excel)")
     st.caption(
-        "Download the template, fill it in Excel or any spreadsheet app, "
-        "then upload it here to apply your values."
+        "Download the template, fill it in Excel, then upload it here to apply your values."
     )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    csv_data = config_to_csv_bytes(st.session_state.areas, st.session_state.order_types)
+    excel_data = config_to_excel_bytes(st.session_state.areas, st.session_state.order_types)
 
     col_dl, col_ul = st.columns(2)
 
     with col_dl:
         st.markdown("**Step 1 — Download template**")
         st.caption(
-            "Contains your current values pre-filled. Edit numbers in Excel, "
-            "save as CSV, and upload. Comment rows (starting with #) explain each field."
+            "Contains your current values pre-filled across three sheets: "
+            "Instructions, Areas, and Order Types. Edit numbers directly, save, and upload."
         )
         st.download_button(
-            "⬇️ Download configuration template (CSV)",
-            data=csv_data,
-            file_name="warehouse_config_" + timestamp + ".csv",
-            mime="text/csv",
+            "⬇️ Download configuration template (.xlsx)",
+            data=excel_data,
+            file_name="warehouse_config_" + timestamp + ".xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
 
     with col_ul:
         st.markdown("**Step 2 — Upload filled template**")
-        st.caption("Upload the same CSV after editing. Both areas and order types load at once.")
+        st.caption("Upload the same .xlsx after editing. Both sheets load at once.")
         uploaded = st.file_uploader(
-            "Choose CSV file", type=["csv"], key="upload_config",
+            "Choose Excel file", type=["xlsx"], key="upload_config",
             label_visibility="collapsed")
 
         if uploaded is not None:
             try:
-                preview_areas, preview_orders = csv_bytes_to_config(uploaded.getvalue())
+                preview_areas, preview_orders = excel_bytes_to_config(uploaded.getvalue())
                 st.success(
                     "✅ File parsed successfully — " + str(len(preview_areas)) + " areas and "
                     + str(len(preview_orders)) + " order types found. Review below, then click Apply.")
@@ -769,7 +802,7 @@ if page == "⚙️ Settings":
                         } for ot in preview_orders]),
                         use_container_width=True, hide_index=True)
 
-                if st.button("✅ Apply imported configuration", type="primary", use_container_width=True, key="apply_csv_config"):
+                if st.button("✅ Apply imported configuration", type="primary", use_container_width=True, key="apply_excel_config"):
                     st.session_state.areas = preview_areas
                     st.session_state.order_types = preview_orders
                     if db.is_db_configured():
@@ -780,17 +813,18 @@ if page == "⚙️ Settings":
                     st.rerun()
 
             except Exception as e:
-                st.error("❌ Could not parse CSV: " + str(e))
+                st.error("❌ Could not parse Excel file: " + str(e))
                 st.caption(
-                    "Common causes: the [AREAS] or [ORDERS] header row was edited/removed, "
-                    "a required column is missing, or a percentage field has text instead of a number."
+                    "Common causes: the 'Areas' or 'Order Types' sheet was renamed/removed, "
+                    "a required column header was changed, or a percentage cell has text instead of a number."
                 )
-                with st.expander("🔍 Show raw file content for debugging"):
+                with st.expander("🔍 Sheet names found in uploaded file"):
                     try:
-                        raw_preview = uploaded.getvalue().decode("utf-8-sig", errors="replace")
-                        st.code(raw_preview[:3000], language="text")
+                        from openpyxl import load_workbook as _lw
+                        wb_debug = _lw(io.BytesIO(uploaded.getvalue()))
+                        st.write(wb_debug.sheetnames)
                     except Exception:
-                        st.caption("Could not display file content.")
+                        st.caption("Could not read the uploaded file at all — it may not be a valid .xlsx file.")
 
     st.markdown("---")
     st.subheader("🗄️ Database controls")
