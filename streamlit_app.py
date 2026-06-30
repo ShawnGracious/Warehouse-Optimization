@@ -807,6 +807,30 @@ if page == "⚙️ Settings":
             "No database connected. Values only persist for this browser session. "
             "See README.md for the one-time Supabase setup (free, ~5 minutes)."
         )
+        with st.expander("🔍 Run connection diagnostic", expanded=True):
+            diag = db.diagnose()
+            steps = [
+                ("Secrets section [supabase] found", diag["secrets_section_found"]),
+                ("url value found",                  diag["url_found"]),
+                ("key value found",                  diag["key_found"]),
+                ("Client created",                   diag["client_created"]),
+                ("Test query to database succeeded", diag["query_succeeded"]),
+            ]
+            for label, ok in steps:
+                if ok:
+                    st.markdown("✅ " + label)
+                else:
+                    st.markdown("❌ " + label)
+                    break
+            if diag["url_preview"]:
+                st.caption("URL detected: " + diag["url_preview"])
+            if diag["error"]:
+                st.error(diag["error"])
+            st.caption(
+                "Run this after every change to Secrets — Streamlit Cloud needs "
+                "~20-30 seconds and sometimes a manual reboot (⋮ menu → Reboot app) "
+                "to pick up new secrets."
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
