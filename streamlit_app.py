@@ -738,11 +738,11 @@ if page == "⚙️ Settings":
             try:
                 preview_areas, preview_orders = csv_bytes_to_config(uploaded.getvalue())
                 st.success(
-                    "Parsed OK — " + str(len(preview_areas)) + " areas  ·  "
-                    + str(len(preview_orders)) + " order types. Click Apply to load.")
+                    "✅ File parsed successfully — " + str(len(preview_areas)) + " areas and "
+                    + str(len(preview_orders)) + " order types found. Review below, then click Apply.")
 
                 # show a quick preview so user can verify before applying
-                with st.expander("Preview imported values", expanded=False):
+                with st.expander("📋 Preview imported values", expanded=True):
                     st.markdown("**Areas**")
                     st.dataframe(
                         pd.DataFrame([{
@@ -769,7 +769,7 @@ if page == "⚙️ Settings":
                         } for ot in preview_orders]),
                         use_container_width=True, hide_index=True)
 
-                if st.button("✅ Apply imported configuration", type="primary", use_container_width=True):
+                if st.button("✅ Apply imported configuration", type="primary", use_container_width=True, key="apply_csv_config"):
                     st.session_state.areas = preview_areas
                     st.session_state.order_types = preview_orders
                     if db.is_db_configured():
@@ -780,8 +780,17 @@ if page == "⚙️ Settings":
                     st.rerun()
 
             except Exception as e:
-                st.error("Could not parse CSV: " + str(e))
-                st.caption("Make sure you uploaded the correct template file without renaming columns.")
+                st.error("❌ Could not parse CSV: " + str(e))
+                st.caption(
+                    "Common causes: the [AREAS] or [ORDERS] header row was edited/removed, "
+                    "a required column is missing, or a percentage field has text instead of a number."
+                )
+                with st.expander("🔍 Show raw file content for debugging"):
+                    try:
+                        raw_preview = uploaded.getvalue().decode("utf-8-sig", errors="replace")
+                        st.code(raw_preview[:3000], language="text")
+                    except Exception:
+                        st.caption("Could not display file content.")
 
     st.markdown("---")
     st.subheader("🗄️ Database controls")
