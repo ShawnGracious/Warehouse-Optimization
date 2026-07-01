@@ -1,54 +1,70 @@
 """
 Warehouse Capacity Planner - Configuration & Data Models
 
-BOM split logic (two independent splits):
-  Split 1 — Storage split:    paper_pct + consumable_pct = 100%
-                               How much of an order comes from 600 vs 400
-  Split 2 — Customer split:   cust1_pct + cust2_pct = 100%
-                               How 400 material divides between zone 300 and 200
+Areas: 600 Paper | 400 Consumables | 300 Cust.Specific 1 | 200 Cust.Specific 2 | 100 Final
+Volume is calculated from rack dimensions: L × D × H × num_racks
 
 Flow rules:
-  600 → Smart Bulk (staging) → direct to 100 Final/Packout
-  400 → 300 or 200 (by customer split %)
-  300/200 → Kitting (kitting_pct) → back to 300/200 → 100 Final
-  300/200 → direct to 100 Final (packout_pct)
+  600 → 300 or 200 (paper split per order)
+  400 → 300 or 200 (customer split per order)
+  300 / 200 → 100 Final (packout)
 """
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 
+# ---------------------------------------------------------------------------
+# Zone definitions
+# ---------------------------------------------------------------------------
 ZONE_NAMES: Dict[str, str] = {
-    "600":        "Paper",
-    "400":        "Consumables",
-    "300":        "Customer Specific 1",
-    "200":        "Customer Specific 2",
-    "100":        "Final (ready to ship)",
-    "SMART_BULK": "Smart Bulk (Paper staging)",
+    "600": "Paper",
+    "400": "Consumables",
+    "300": "Customer Specific 1",
+    "200": "Customer Specific 2",
+    "100": "Final (ready to ship)",
 }
 
-ZONE_FLOW_ORDER = ["600", "SMART_BULK", "400", "300", "200", "100"]
+ZONE_FLOW_ORDER = ["600", "400", "300", "200", "100"]
 
 
+# ---------------------------------------------------------------------------
+# StorageArea — volume derived from rack dimensions
+# ---------------------------------------------------------------------------
 @dataclass
 class StorageArea:
     id: str
     name: str
     zone: str
-    volume_cuft: float
-    avg_box_size_cuft: float
-    efficiency: float
-    units_per_box: float
-    is_staging: bool = False
-    max_concurrent_boxes: Optional[int] = None  # hard cap; None = no cap, use volume
+    # Rack dimensions (in the current display unit, stored in cu ft internally)
+    rack_length_cuft: float       # length of one rack (cu ft)
+    rack_depth_cuft:  float       # depth of one rack (cu ft)
+    rack_height_cuft: float       # height of one rack (cu ft)
+    num_racks:        int          # number of racks in this area
+    efficiency:       float        # usable fraction 0–1
+    units_per_box:      float      # avg units per box in this area
+    box_length_cuft:    float      # box length (cu ft)
+    box_depth_cuft:     float      # box depth  (cu ft)
+    box_height_cuft:    float      # box height (cu ft)
+    max_concurrent_boxes: Optional[int] = None  # hard cap; None = use volume
+
+    @property
+    def avg_box_size_cuft(self) -> float:
+        """Box volume = L × D × H."""
+        return self.box_length_cuft * self.box_depth_cuft * self.box_height_cuft
+
+    @property
+    def volume_cuft(self) -> float:
+        """Total cubic feet = L × D × H × num_racks."""
+        return self.rack_length_cuft * self.rack_depth_cuft * self.rack_height_cuft * self.num_racks
+
+    @property
+    def rack_volume_cuft(self) -> float:
+        """Volume of a single rack."""
+        return self.rack_length_cuft * self.rack_depth_cuft * self.rack_height_cuft
 
     @property
     def capacity_boxes(self) -> int:
-        """
-        Effective capacity in boxes.
-        If max_concurrent_boxes is set it acts as a hard cap —
-        utilization is measured against it rather than volume.
-        """
         vol_cap = int((self.volume_cuft * self.efficiency) / self.avg_box_size_cuft)
         if self.max_concurrent_boxes is not None:
             return min(self.max_concurrent_boxes, vol_cap)
@@ -74,38 +90,33 @@ class StorageArea:
         return "OK"
 
 
+# ---------------------------------------------------------------------------
+# Order splits
+# ---------------------------------------------------------------------------
 @dataclass
 class StorageSplit:
-    """
-    Split 1 — how an order's total units split between raw storage zones.
-    paper_pct + consumable_pct should = 100.
-    """
-    paper_pct:      float = 50.0   # % going to 600 (Paper)
-    consumable_pct: float = 50.0   # % going to 400 (Consumables)
+    """Split 1 — paper_pct + consumable_pct = 100."""
+    paper_pct:      float = 50.0
+    consumable_pct: float = 50.0
 
 
 @dataclass
 class CustomerSplit:
-    """
-    Split 2 — how the 400 (Consumables) portion splits between customers.
-    cust1_pct + cust2_pct should = 100.
-    Applied only to the consumable_pct portion of the order.
-    """
-    cust1_pct: float = 60.0   # % of consumables going to 300 (Cust. Spec 1)
-    cust2_pct: float = 40.0   # % of consumables going to 200 (Cust. Spec 2)
+    """Split 2 — cust1_pct + cust2_pct = 100 (applied to consumable portion)."""
+    cust1_pct: float = 60.0
+    cust2_pct: float = 40.0
 
 
 @dataclass
 class KittingSplit:
-    """
-    What % of 300/200 material goes to Kitting vs direct to 100 Final.
-    packout_pct + kitting_pct should = 100.
-    Kitting material returns to 300/200 then flows to 100 normally.
-    """
+    """Split 3 — packout_pct + kitting_pct = 100 (of 300/200 material)."""
     packout_pct: float = 70.0
     kitting_pct: float = 30.0
 
 
+# ---------------------------------------------------------------------------
+# OrderType
+# ---------------------------------------------------------------------------
 @dataclass
 class OrderType:
     id: str
@@ -120,27 +131,21 @@ class OrderType:
         return self.daily_volume * multiplier * self.avg_units_per_order
 
     def units_paper(self, multiplier: float = 1.0) -> float:
-        """Units drawn from zone 600 (Paper)."""
         return self.total_units(multiplier) * (self.storage_split.paper_pct / 100)
 
     def units_consumable(self, multiplier: float = 1.0) -> float:
-        """Units drawn from zone 400 (Consumables)."""
         return self.total_units(multiplier) * (self.storage_split.consumable_pct / 100)
 
     def units_cust1(self, multiplier: float = 1.0) -> float:
-        """Units routed to zone 300 (from the consumable portion)."""
         return self.units_consumable(multiplier) * (self.customer_split.cust1_pct / 100)
 
     def units_cust2(self, multiplier: float = 1.0) -> float:
-        """Units routed to zone 200 (from the consumable portion)."""
         return self.units_consumable(multiplier) * (self.customer_split.cust2_pct / 100)
 
     def boxes_in_area(self, area: "StorageArea", multiplier: float = 1.0) -> float:
-        """Boxes this order places in a given area, using area's units_per_box."""
+        """Boxes placed in a given area based on zone routing."""
         if area.zone == "600":
             units = self.units_paper(multiplier)
-        elif area.zone == "SMART_BULK":
-            units = self.units_paper(multiplier)   # mirrors 600 volume
         elif area.zone == "400":
             units = self.units_consumable(multiplier)
         elif area.zone == "300":
@@ -153,32 +158,40 @@ class OrderType:
 
 
 # ---------------------------------------------------------------------------
-# Default areas
+# Default areas  (5 areas, rack dimensions in cu ft)
+# Typical rack: 4ft L × 2ft D × 8ft H = 64 cu ft per rack
 # ---------------------------------------------------------------------------
 DEFAULT_AREAS: List[StorageArea] = [
-    StorageArea(id="zone600",    name="600 – Paper",
-                zone="600",        volume_cuft=18000, avg_box_size_cuft=5.0,
-                efficiency=0.70,   units_per_box=24.0),
-    StorageArea(id="smart_bulk", name="Smart Bulk (Paper staging)",
-                zone="SMART_BULK", volume_cuft=8000,  avg_box_size_cuft=5.0,
-                efficiency=0.80,   units_per_box=24.0, is_staging=True,
-                max_concurrent_boxes=200),
-    StorageArea(id="zone400",    name="400 – Consumables",
-                zone="400",        volume_cuft=14000, avg_box_size_cuft=3.5,
-                efficiency=0.75,   units_per_box=12.0),
-    StorageArea(id="zone300",    name="300 – Customer Specific 1",
-                zone="300",        volume_cuft=9000,  avg_box_size_cuft=2.5,
-                efficiency=0.80,   units_per_box=8.0),
-    StorageArea(id="zone200",    name="200 – Customer Specific 2",
-                zone="200",        volume_cuft=9000,  avg_box_size_cuft=2.5,
-                efficiency=0.80,   units_per_box=8.0),
-    StorageArea(id="packout",    name="Packout (Final assembly)",
-                zone="100",        volume_cuft=6000,  avg_box_size_cuft=1.5,
-                efficiency=0.85,   units_per_box=6.0),
-    StorageArea(id="kitting",    name="Kitting (Custom kit assembly)",
-                zone="100",        volume_cuft=4000,  avg_box_size_cuft=1.5,
-                efficiency=0.85,   units_per_box=6.0,
-                max_concurrent_boxes=150),
+    StorageArea(
+        id="zone600", name="600 – Paper", zone="600",
+        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
+        num_racks=56, efficiency=0.70,
+        box_length_cuft=1.5, box_depth_cuft=1.5, box_height_cuft=2.2, units_per_box=24.0,
+    ),
+    StorageArea(
+        id="zone400", name="400 – Consumables", zone="400",
+        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
+        num_racks=44, efficiency=0.75,
+        box_length_cuft=1.2, box_depth_cuft=1.2, box_height_cuft=2.4, units_per_box=12.0,
+    ),
+    StorageArea(
+        id="zone300", name="300 – Customer Specific 1", zone="300",
+        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
+        num_racks=28, efficiency=0.80,
+        box_length_cuft=1.0, box_depth_cuft=1.0, box_height_cuft=2.5, units_per_box=8.0,
+    ),
+    StorageArea(
+        id="zone200", name="200 – Customer Specific 2", zone="200",
+        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
+        num_racks=28, efficiency=0.80,
+        box_length_cuft=1.0, box_depth_cuft=1.0, box_height_cuft=2.5, units_per_box=8.0,
+    ),
+    StorageArea(
+        id="packout", name="Packout – Final Assembly", zone="100",
+        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=6.0,
+        num_racks=19, efficiency=0.85,
+        box_length_cuft=1.0, box_depth_cuft=1.0, box_height_cuft=1.5, units_per_box=6.0,
+    ),
 ]
 
 # ---------------------------------------------------------------------------
