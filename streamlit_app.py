@@ -27,7 +27,7 @@ st.set_page_config(
 )
 
 ZONE_COLORS = {
-    "600": "#4f6ef7", "SMART_BULK": "#7c5cfc",
+    "600": "#4f6ef7",
     "400": "#06b6d4", "300": "#10b981",
     "200": "#f59e0b", "100": "#ef4444",
 }
@@ -93,15 +93,19 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 AREA_COLS = [
-    ("area_id",              "Area ID",            "Unique key - do not change"),
-    ("area_name",            "Area Name",          "Display name - safe to edit"),
-    ("zone",                 "Zone",               "Zone code - do not change unless restructuring"),
-    ("volume_cuft",          "Volume (cu ft)",     "Total cubic feet of the storage area"),
-    ("avg_box_size_cuft",    "Avg Box Size (cu ft)","Average size of one box in cubic feet"),
-    ("efficiency",           "Efficiency (0-1)",   "Usable fraction, e.g. 0.75 = 75% after aisles/racking"),
-    ("units_per_box",        "Units per Box",      "Average units that fit in one box in this area"),
-    ("is_staging",           "Is Staging",         "TRUE or FALSE - leave as-is unless restructuring"),
-    ("max_concurrent_boxes", "Max Concurrent Boxes","Hard cap on boxes worked at once - leave blank for no cap"),
+    ("area_id",              "Area ID",             "Unique key - do not change"),
+    ("area_name",            "Area Name",           "Display name - safe to edit"),
+    ("zone",                 "Zone",                "Zone code - do not change"),
+    ("rack_length_cuft",     "Rack Length (cu ft)", "Length of one rack in cubic feet"),
+    ("rack_depth_cuft",      "Rack Depth (cu ft)",  "Depth of one rack in cubic feet"),
+    ("rack_height_cuft",     "Rack Height (cu ft)", "Height of one rack in cubic feet"),
+    ("num_racks",            "Number of Racks",     "How many racks in this area"),
+    ("box_length_cuft",      "Box Length (cu ft)",  "Length of average box in cubic feet"),
+    ("box_depth_cuft",       "Box Width (cu ft)",   "Width of average box in cubic feet"),
+    ("box_height_cuft",      "Box Height (cu ft)",  "Height of average box in cubic feet"),
+    ("efficiency",           "Efficiency (0-1)",    "Usable fraction, e.g. 0.75 = 75% after aisles"),
+    ("units_per_box",        "Units per Box",       "Average units that fit in one box in this area"),
+    ("max_concurrent_boxes", "Max Concurrent Boxes","Hard cap on boxes at once - leave blank for no cap"),
 ]
 
 ORDER_COLS = [
@@ -182,9 +186,10 @@ def config_to_excel_bytes(areas, order_types) -> bytes:
 
     for r_idx, a in enumerate(areas, start=3):
         values = [
-            a.id, a.name, a.zone, a.volume_cuft, a.avg_box_size_cuft,
+            a.id, a.name, a.zone,
+            a.rack_length_cuft, a.rack_depth_cuft, a.rack_height_cuft, a.num_racks,
+            a.box_length_cuft, a.box_depth_cuft, a.box_height_cuft,
             a.efficiency, a.units_per_box,
-            "TRUE" if a.is_staging else "FALSE",
             a.max_concurrent_boxes if a.max_concurrent_boxes is not None else None,
         ]
         for col_idx, val in enumerate(values, start=1):
@@ -194,10 +199,7 @@ def config_to_excel_bytes(areas, order_types) -> bytes:
             if col_idx == 1:
                 cell.fill = KEY_FILL
 
-    # TRUE/FALSE dropdown on is_staging column (column 8)
-    dv = DataValidation(type="list", formula1='"TRUE,FALSE"', allow_blank=False)
-    ws_a.add_data_validation(dv)
-    dv.add("H3:H" + str(2 + max(len(areas), 1) + 20))
+    # No dropdown validation needed for rack-based areas
 
     # ── Order Types sheet ────────────────────────────────────────────────────
     ws_o = wb.create_sheet("Order Types")
@@ -260,11 +262,15 @@ def excel_bytes_to_config(file_bytes):
             id=str(d["area_id"]).strip(),
             name=str(d["area_name"]).strip(),
             zone=str(d["zone"]).strip(),
-            volume_cuft=float(d["volume_cuft"]),
-            avg_box_size_cuft=float(d["avg_box_size_cuft"]),
+            rack_length_cuft=float(d["rack_length_cuft"]),
+            rack_depth_cuft=float(d["rack_depth_cuft"]),
+            rack_height_cuft=float(d["rack_height_cuft"]),
+            num_racks=int(float(d["num_racks"])),
+            box_length_cuft=float(d["box_length_cuft"]),
+            box_depth_cuft=float(d["box_depth_cuft"]),
+            box_height_cuft=float(d["box_height_cuft"]),
             efficiency=float(d["efficiency"]),
             units_per_box=float(d["units_per_box"]),
-            is_staging=(str(d.get("is_staging","FALSE")).strip().upper() == "TRUE"),
             max_concurrent_boxes=max_b,
         ))
 
@@ -340,9 +346,8 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
     st.caption("**Zone legend**")
-    for zone, name in [("600","Paper"),("SMART_BULK","Smart Bulk"),
-                        ("400","Consumables"),("300","Cust. Spec 1"),
-                        ("200","Cust. Spec 2"),("100","Final")]:
+    for zone, name in [("600","Paper"),("400","Consumables"),
+                        ("300","Cust. Spec 1"),("200","Cust. Spec 2"),("100","Final")]:
         c = ZONE_COLORS.get(zone, "#888")
         st.markdown(
             '<span style="display:inline-block;width:10px;height:10px;'
@@ -513,10 +518,11 @@ if page == "🏭 Material flow":
         # ── live volume callouts ─────────────────────────────────────────
         fig.add_annotation(
             x=50, y=96,
-            text="<b>Today at ×1.0:</b>  "
-                 + "Smart Bulk " + str(int(fl.paper_to_smart_bulk)) + " boxes/day  |  "
-                 + "Zn300 " + str(int(fl.consumables_to_300)) + "  |  "
-                 + "Zn200 " + str(int(fl.consumables_to_200)) + " boxes/day",
+            text="<b>Today at x1.0:</b>  "
+                 + "Paper->300: " + str(int(fl.paper_to_300)) + "  |  "
+                 + "Paper->200: " + str(int(fl.paper_to_200)) + "  |  "
+                 + "Cons->300: " + str(int(fl.consumables_to_300)) + "  |  "
+                 + "Cons->200: " + str(int(fl.consumables_to_200)) + " boxes/day",
             showarrow=False, font=dict(size=11, color="#94a3b8"),
             xref="x", yref="y", align="center",
             bgcolor="rgba(30,34,53,0.9)", borderpad=6,
@@ -542,10 +548,10 @@ if page == "🏭 Material flow":
 
     st.subheader("Live flow volumes at x1.0")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Paper to Smart Bulk",    str(int(fl.paper_to_smart_bulk))  + " boxes/day")
-    c2.metric("Consumables total",      str(int(fl.consumables_total))    + " boxes/day")
-    c3.metric("Consumables to Zn 300",  str(int(fl.consumables_to_300))   + " boxes/day")
-    c4.metric("Consumables to Zn 200",  str(int(fl.consumables_to_200))   + " boxes/day")
+    c1.metric("Paper to Zone 300",       str(int(fl.paper_to_300))         + " boxes/day")
+    c2.metric("Paper to Zone 200",       str(int(fl.paper_to_200))         + " boxes/day")
+    c3.metric("Consumables to Zn 300",   str(int(fl.consumables_to_300))   + " boxes/day")
+    c4.metric("Consumables to Zn 200",   str(int(fl.consumables_to_200))   + " boxes/day")
 
     st.markdown("#### Per order type")
     for ot in engine.order_types:
@@ -615,43 +621,85 @@ if page == "⚙️ Settings":
 
     st.markdown("---")
     st.subheader("Storage areas")
+    st.caption("Set rack dimensions and number of racks — volume is calculated automatically.")
     area_updates = {}
     cols = st.columns(2)
     for i, area in enumerate(st.session_state.areas):
         with cols[i % 2]:
-            zone_str = "Staging" if area.is_staging else "Zone " + area.zone
-            with st.expander("**" + area.name + "** — " + zone_str, expanded=True):
+            with st.expander("**" + area.name + "** — Zone " + area.zone, expanded=True):
                 ul = unit_label()
-                disp_vol = to_display(area.volume_cuft)
-                disp_box = to_display(area.avg_box_size_cuft)
-                v_vol_d = st.number_input("Volume (" + ul + ")",       value=float(disp_vol),           step=float(max(0.1, round(to_display(100),1))), key="vol_" + area.id)
-                v_box_d = st.number_input("Avg box size (" + ul + ")", value=float(disp_box),           step=float(max(0.001, round(to_display(0.1),3))), key="box_" + area.id)
-                v_eff   = st.number_input("Efficiency (0-1)",           value=float(area.efficiency),   step=0.01, min_value=0.1, max_value=1.0, key="eff_" + area.id)
-                v_upb   = st.number_input("Units per box",              value=float(area.units_per_box),step=1.0,  min_value=1.0, key="upb_" + area.id)
-                v_vol = to_cuft(v_vol_d)
-                v_box = to_cuft(v_box_d)
-                # Max concurrent boxes — only shown for Smart Bulk and Kitting
-                v_max_boxes = None
-                if area.has_box_cap or area.id in ("smart_bulk", "kitting"):
-                    st.markdown("---")
-                    st.markdown("**🔢 Max concurrent boxes** — hard cap for this work station")
-                    st.caption("Utilization is measured against this limit, not area volume. Set to 0 to use volume-based capacity only.")
-                    cur_max = area.max_concurrent_boxes if area.max_concurrent_boxes is not None else 0
-                    raw_max = st.number_input("Max boxes in station at one time",
-                        value=int(cur_max), step=10, min_value=0, key="maxb_" + area.id)
-                    v_max_boxes = int(raw_max) if raw_max > 0 else None
-                    if v_max_boxes:
-                        st.info("Hard cap active: capacity = **" + str(v_max_boxes) + " boxes**")
-                    else:
-                        st.info("No box cap — capacity determined by volume only")
-                vol_cap = int((v_vol * v_eff) / v_box) if v_box > 0 else 0
+
+                # ── Rack dimensions ───────────────────────────────────────
+                st.markdown("**Rack dimensions**")
+                rc1, rc2, rc3 = st.columns(3)
+                v_rlen = rc1.number_input("Length (" + ul + ")", value=float(to_display(area.rack_length_cuft)), step=float(max(0.1, round(to_display(1),2))), min_value=0.1, key="rlen_" + area.id)
+                v_rdep = rc2.number_input("Depth (" + ul + ")",  value=float(to_display(area.rack_depth_cuft)),  step=float(max(0.1, round(to_display(1),2))), min_value=0.1, key="rdep_" + area.id)
+                v_rhgt = rc3.number_input("Height (" + ul + ")", value=float(to_display(area.rack_height_cuft)), step=float(max(0.1, round(to_display(1),2))), min_value=0.1, key="rhgt_" + area.id)
+
+                v_nracks = st.number_input("Number of racks", value=int(area.num_racks), step=1, min_value=1, key="nrk_" + area.id)
+
+                # convert back to cu ft for storage
+                v_rlen_cuft = to_cuft(v_rlen)
+                v_rdep_cuft = to_cuft(v_rdep)
+                v_rhgt_cuft = to_cuft(v_rhgt)
+                rack_vol_cuft = v_rlen_cuft * v_rdep_cuft * v_rhgt_cuft
+                total_vol_cuft = rack_vol_cuft * v_nracks
+
+                st.caption(
+                    "Single rack: " + str(round(to_display(rack_vol_cuft), 2)) + " " + ul +
+                    "  ·  Total volume: " + str(round(to_display(total_vol_cuft), 1)) + " " + ul
+                )
+
+                st.markdown("---")
+
+                # ── Other settings ────────────────────────────────────────
+                v_eff = st.number_input("Efficiency (0–1)", value=float(area.efficiency), step=0.01, min_value=0.1, max_value=1.0, key="eff_" + area.id, help="Usable fraction after aisles and stacking limits, e.g. 0.75 = 75%")
+
+                st.markdown("**Avg box dimensions**")
+                bc1, bc2, bc3 = st.columns(3)
+                v_blen = bc1.number_input("Length (" + ul + ")", value=float(to_display(area.box_length_cuft)), step=float(max(0.01, round(to_display(0.1), 3))), min_value=0.001, key="blen_" + area.id)
+                v_bdep = bc2.number_input("Width (" + ul + ")",  value=float(to_display(area.box_depth_cuft)),  step=float(max(0.01, round(to_display(0.1), 3))), min_value=0.001, key="bdep_" + area.id)
+                v_bhgt = bc3.number_input("Height (" + ul + ")", value=float(to_display(area.box_height_cuft)), step=float(max(0.01, round(to_display(0.1), 3))), min_value=0.001, key="bhgt_" + area.id)
+                v_blen_cuft = to_cuft(v_blen)
+                v_bdep_cuft = to_cuft(v_bdep)
+                v_bhgt_cuft = to_cuft(v_bhgt)
+                v_box_cuft = v_blen_cuft * v_bdep_cuft * v_bhgt_cuft
+                st.caption("Box volume: " + str(round(to_display(v_box_cuft), 3)) + " " + ul)
+
+                v_upb = st.number_input("Units per box", value=float(area.units_per_box), step=1.0, min_value=1.0, key="upb_" + area.id)
+
+                # ── Max concurrent boxes ──────────────────────────────────
+                st.markdown("---")
+                st.markdown("**🔢 Max concurrent boxes** *(optional hard cap)*")
+                st.caption("Set a limit if this area has a physical processing constraint. Leave 0 for no cap.")
+                cur_max = area.max_concurrent_boxes if area.max_concurrent_boxes is not None else 0
+                raw_max = st.number_input("Max boxes", value=int(cur_max), step=10, min_value=0, key="maxb_" + area.id, label_visibility="collapsed")
+                v_max_boxes = int(raw_max) if raw_max > 0 else None
+
+                # ── Live capacity preview ─────────────────────────────────
+                vol_cap = int((total_vol_cuft * v_eff) / v_box_cuft) if v_box_cuft > 0 else 0
                 eff_cap = min(v_max_boxes, vol_cap) if v_max_boxes else vol_cap
                 cap_units = int(eff_cap * v_upb)
-                st.info("Effective capacity: **" + str(eff_cap) + " boxes**  |  **" + str(cap_units) + " units**")
+                cap_label = " (box cap active)" if v_max_boxes and v_max_boxes < vol_cap else " (volume-based)"
+                st.info(
+                    "Volume: **" + str(round(to_display(total_vol_cuft), 1)) + " " + ul + "**"
+                    + "  ·  Capacity: **" + str(eff_cap) + " boxes**"
+                    + "  ·  **" + str(cap_units) + " units**"
+                    + cap_label
+                )
+
                 area_updates[area.id] = dict(
-                    volume_cuft=v_vol, avg_box_size_cuft=v_box,
-                    efficiency=v_eff,  units_per_box=v_upb,
-                    max_concurrent_boxes=v_max_boxes)
+                    rack_length_cuft=v_rlen_cuft,
+                    rack_depth_cuft=v_rdep_cuft,
+                    rack_height_cuft=v_rhgt_cuft,
+                    num_racks=int(v_nracks),
+                    box_length_cuft=v_blen_cuft,
+                    box_depth_cuft=v_bdep_cuft,
+                    box_height_cuft=v_bhgt_cuft,
+                    efficiency=v_eff,
+                    units_per_box=v_upb,
+                    max_concurrent_boxes=v_max_boxes,
+                )
 
     st.markdown("---")
     st.subheader("Order types")
@@ -708,12 +756,16 @@ if page == "⚙️ Settings":
         area_map = {a.id: a for a in st.session_state.areas}
         for aid, u in area_updates.items():
             a = area_map[aid]
-            a.volume_cuft           = u["volume_cuft"]
-            a.avg_box_size_cuft     = u["avg_box_size_cuft"]
-            a.efficiency            = u["efficiency"]
-            a.units_per_box         = u["units_per_box"]
-            if "max_concurrent_boxes" in u:
-                a.max_concurrent_boxes = u["max_concurrent_boxes"]
+            a.rack_length_cuft    = u["rack_length_cuft"]
+            a.rack_depth_cuft     = u["rack_depth_cuft"]
+            a.rack_height_cuft    = u["rack_height_cuft"]
+            a.num_racks           = u["num_racks"]
+            a.box_length_cuft     = u["box_length_cuft"]
+            a.box_depth_cuft      = u["box_depth_cuft"]
+            a.box_height_cuft     = u["box_height_cuft"]
+            a.efficiency          = u["efficiency"]
+            a.units_per_box       = u["units_per_box"]
+            a.max_concurrent_boxes = u["max_concurrent_boxes"]
 
         ot_map = {o.id: o for o in st.session_state.order_types}
         for oid, u in order_updates.items():
@@ -780,8 +832,10 @@ if page == "⚙️ Settings":
                     st.dataframe(
                         pd.DataFrame([{
                             "Area": a.name, "Zone": a.zone,
-                            "Volume (cu ft)": a.volume_cuft,
-                            "Box size (cu ft)": a.avg_box_size_cuft,
+                            "L×D×H (cu ft)": f"{a.rack_length_cuft}×{a.rack_depth_cuft}×{a.rack_height_cuft}",
+                            "Racks": a.num_racks,
+                            "Volume (cu ft)": round(a.volume_cuft, 1),
+                            "Box L×W×H (cu ft)": str(a.box_length_cuft)+"×"+str(a.box_depth_cuft)+"×"+str(a.box_height_cuft),
                             "Efficiency": a.efficiency,
                             "Units/box": a.units_per_box,
                             "Max boxes": a.max_concurrent_boxes or "—",
@@ -948,6 +1002,8 @@ elif page == "📦 Analysis":
             rows.append({
                 "Area":         a.area.name,
                 "Zone":         a.area.zone,
+                "Box L×W×H": str(a.area.box_length_cuft)+"×"+str(a.area.box_depth_cuft)+"×"+str(a.area.box_height_cuft),
+                "Box vol (cu ft)": round(a.area.avg_box_size_cuft,3),
                 "Units/box":    int(a.area.units_per_box),
                 "Load (boxes)": str(int(a.load_boxes)),
                 "Cap (boxes)":  str(a.capacity_boxes) + (" 🔢" if a.area.has_box_cap else ""),
