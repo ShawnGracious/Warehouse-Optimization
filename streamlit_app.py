@@ -26,6 +26,60 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Global "compact mode" — shrinks padding, gaps, headers, tables, metrics ──
+# Injected once; applies to every page. Pure CSS, so unmatched rules are no-ops.
+st.markdown("""
+<style>
+/* reclaim the big empty margin at the top + sides of the page */
+.block-container, [data-testid="stMainBlockContainer"] {
+    padding-top: 1.1rem !important;
+    padding-bottom: 1rem !important;
+    padding-left: 1.6rem !important;
+    padding-right: 1.6rem !important;
+    max-width: 100% !important;
+}
+/* tighten the vertical gap between stacked elements */
+[data-testid="stVerticalBlock"] { gap: 0.45rem !important; }
+[data-testid="stHorizontalBlock"] { gap: 0.5rem !important; }
+/* smaller, tighter headings */
+h1, [data-testid="stHeading"] h1 { font-size: 1.5rem  !important; margin: .1rem 0 .3rem 0 !important; }
+h2 { font-size: 1.2rem  !important; margin: .2rem 0 !important; padding: 0 !important; }
+h3 { font-size: 1.02rem !important; margin: .15rem 0 !important; padding: 0 !important; }
+/* captions + small text */
+[data-testid="stCaptionContainer"], .stCaption { font-size: .74rem !important; margin: 0 !important; }
+/* markdown paragraph spacing */
+[data-testid="stMarkdownContainer"] p { margin-bottom: .25rem !important; line-height: 1.3 !important; }
+/* thin dividers */
+hr { margin: .35rem 0 !important; }
+/* compact metrics */
+[data-testid="stMetric"] { padding: .2rem .4rem !important; }
+[data-testid="stMetricValue"] { font-size: 1.05rem !important; }
+[data-testid="stMetricLabel"] { font-size: .68rem !important; }
+[data-testid="stMetricLabel"] p { font-size: .68rem !important; }
+/* dataframes / data_editor: smaller font + rows */
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] { font-size: .78rem !important; }
+[data-testid="stDataFrame"] div, [data-testid="stDataEditor"] div { line-height: 1.15 !important; }
+/* expanders: tight header + body */
+[data-testid="stExpander"] summary { padding: .3rem .55rem !important; font-size: .85rem !important; }
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding: .3rem .6rem !important; }
+/* buttons: less padding */
+.stButton button, [data-testid="stDownloadButton"] button, [data-testid="baseButton-primary"] {
+    padding: .3rem .7rem !important; min-height: 0 !important;
+}
+/* alert / info / success boxes: tighter */
+[data-testid="stAlert"], [data-testid="stAlertContainer"] { padding: .4rem .6rem !important; }
+[data-testid="stAlert"] p { margin: 0 !important; font-size: .8rem !important; }
+/* number inputs a touch shorter */
+[data-testid="stNumberInput"] input { padding-top: .2rem !important; padding-bottom: .2rem !important; }
+/* tabs: tighter tab bar */
+[data-testid="stTabs"] [data-baseweb="tab"] { padding: .3rem .7rem !important; }
+[data-testid="stTabs"] [data-baseweb="tab-list"] { gap: .2rem !important; }
+/* sidebar padding */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .35rem !important; }
+[data-testid="stSidebar"] .block-container { padding-top: 1rem !important; }
+</style>
+""", unsafe_allow_html=True)
+
 ZONE_COLORS = {
     "600": "#4f6ef7",
     "400": "#06b6d4", "300": "#10b981",
@@ -495,7 +549,7 @@ if page == "🏭 Material flow":
             bordercolor="#2e3250", borderwidth=1)
 
         fig.update_layout(
-            height=750,
+            height=540,
             margin=dict(l=10, r=10, t=20, b=10),
             paper_bgcolor="#0f1117",
             plot_bgcolor="#0f1117",
@@ -1021,7 +1075,7 @@ elif page == "📦 Analysis":
         fig.update_layout(
             xaxis=dict(title="Utilization %", range=[0, 115]),
             yaxis=dict(autorange="reversed"),
-            height=320, margin=dict(l=10, r=60, t=20, b=40),
+            height=250, margin=dict(l=10, r=60, t=20, b=40),
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, width="stretch")
 
@@ -1104,7 +1158,7 @@ elif page == "📦 Analysis":
             texttemplate="%{text}",
             hovertemplate="Area: %{x}<br>Mult: %{y}<br>Util: %{z:.1f}%<extra></extra>",
         ))
-        fig3.update_layout(height=500, margin=dict(l=10,r=10,t=20,b=10),
+        fig3.update_layout(height=360, margin=dict(l=10,r=10,t=20,b=10),
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             xaxis=dict(tickangle=-30))
         st.plotly_chart(fig3, width="stretch")
@@ -1161,7 +1215,7 @@ elif page == "📦 Analysis":
             fig4.update_layout(
                 xaxis=dict(title="Multiplier", range=[0, 22]),
                 yaxis=dict(autorange="reversed"),
-                height=280, margin=dict(l=10,r=60,t=40,b=40),
+                height=220, margin=dict(l=10,r=60,t=40,b=40),
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 barmode="overlay")
             st.plotly_chart(fig4, width="stretch")
@@ -1182,7 +1236,7 @@ elif page == "📦 Analysis":
                     ZONE_NAMES["300"]: ZONE_COLORS["300"],
                     ZONE_NAMES["200"]: ZONE_COLORS["200"],
                 })
-            fig5.update_layout(height=320, margin=dict(l=10,r=10,t=40,b=40),
+            fig5.update_layout(height=250, margin=dict(l=10,r=10,t=40,b=40),
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig5, width="stretch")
 
