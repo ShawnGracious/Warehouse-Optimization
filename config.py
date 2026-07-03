@@ -218,28 +218,85 @@ DEFAULT_AREAS: List[StorageArea] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Default order types
+# Default order types — calibrated from the Value Stream Analysis workbook
+# (Sales_Order_Data: 228,396 orders across a 44-day span).
+#
+#   daily_volume        = distinct orders of that type ÷ 44 days
+#   avg_units_per_order = total inventory qty ÷ distinct orders
+#   storage_split       = Paper Goods (Toilet+Towels) qty → 600, remainder → 400
+#   kitting_split       = "Kitted …" category qty → kitting, remainder → packout
+#   customer_split      = 300 vs 200 assumption — the sales data has no customer
+#                         dimension, so a nominal 60/40 is kept for every type.
 # ---------------------------------------------------------------------------
 DEFAULT_ORDER_TYPES: List[OrderType] = [
     OrderType(
-        id="SO", name="SO – Standard Order",
-        daily_volume=120, avg_units_per_order=50,
-        storage_split=StorageSplit(paper_pct=40.0, consumable_pct=60.0),
+        id="SO", name="SO – Sales Order",
+        daily_volume=3321, avg_units_per_order=11,
+        storage_split=StorageSplit(paper_pct=37.8, consumable_pct=62.2),
         customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
-        kitting_split=KittingSplit(packout_pct=70.0, kitting_pct=30.0),
+        kitting_split=KittingSplit(packout_pct=84.2, kitting_pct=15.8),
     ),
     OrderType(
-        id="SW", name="SW – Special Warehouse",
-        daily_volume=40, avg_units_per_order=35,
-        storage_split=StorageSplit(paper_pct=20.0, consumable_pct=80.0),
-        customer_split=CustomerSplit(cust1_pct=50.0, cust2_pct=50.0),
-        kitting_split=KittingSplit(packout_pct=50.0, kitting_pct=50.0),
+        id="BE", name="BE – Order type BE",
+        daily_volume=1626, avg_units_per_order=6,
+        storage_split=StorageSplit(paper_pct=30.2, consumable_pct=69.8),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=77.0, kitting_pct=23.0),
     ),
     OrderType(
-        id="BW", name="BW – Bulk Warehouse",
-        daily_volume=25, avg_units_per_order=120,
-        storage_split=StorageSplit(paper_pct=60.0, consumable_pct=40.0),
-        customer_split=CustomerSplit(cust1_pct=70.0, cust2_pct=30.0),
+        id="SW", name="SW – Order type SW",
+        daily_volume=198, avg_units_per_order=6,
+        storage_split=StorageSplit(paper_pct=32.2, consumable_pct=67.8),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=82.4, kitting_pct=17.6),
+    ),
+    OrderType(
+        id="DR", name="DR – Order type DR",
+        daily_volume=17, avg_units_per_order=112,
+        storage_split=StorageSplit(paper_pct=37.1, consumable_pct=62.9),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=78.1, kitting_pct=21.9),
+    ),
+    OrderType(
+        id="CX", name="CX – Order type CX",
+        daily_volume=16, avg_units_per_order=129,
+        storage_split=StorageSplit(paper_pct=8.3, consumable_pct=91.7),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=68.0, kitting_pct=32.0),
+    ),
+    OrderType(
+        id="BW", name="BW – Order type BW",
+        daily_volume=6, avg_units_per_order=3,
+        storage_split=StorageSplit(paper_pct=3.7, consumable_pct=96.3),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=3.7, kitting_pct=96.3),
+    ),
+    OrderType(
+        id="SB", name="SB – Order type SB",
+        daily_volume=4, avg_units_per_order=2,
+        storage_split=StorageSplit(paper_pct=0.0, consumable_pct=100.0),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=3.8, kitting_pct=96.2),
+    ),
+    OrderType(
+        id="SR", name="SR – Order type SR",
+        daily_volume=2, avg_units_per_order=6,
+        storage_split=StorageSplit(paper_pct=10.3, consumable_pct=89.7),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=42.5, kitting_pct=57.5),
+    ),
+    OrderType(
+        id="SS", name="SS – Order type SS",
+        daily_volume=1, avg_units_per_order=3,
+        storage_split=StorageSplit(paper_pct=2.8, consumable_pct=97.2),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
         kitting_split=KittingSplit(packout_pct=80.0, kitting_pct=20.0),
+    ),
+    OrderType(
+        id="LR", name="LR – Order type LR",
+        daily_volume=1, avg_units_per_order=3,
+        storage_split=StorageSplit(paper_pct=0.0, consumable_pct=100.0),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=100.0, kitting_pct=0.0),
     ),
 ]
