@@ -158,35 +158,58 @@ class OrderType:
 
 
 # ---------------------------------------------------------------------------
-# Default areas  (5 areas, rack dimensions in cu ft)
-# Typical rack: 4ft L × 2ft D × 8ft H = 64 cu ft per rack
+# Default areas — calibrated from the section capacity workbooks
+# (Sojo_Capacity_Project + per-section 200/300/400/600 sheets).
+#
+# All dimensions are internal cubic feet (cm → ft ÷ 30.48, m³ × 35.3147).
+# For each audited section the rack envelope (rack L×D×H × num_racks) and
+# efficiency reproduce the workbook's raw volume and mean box efficiency, and
+# `max_concurrent_boxes` pins displayed capacity to the audited box/pallet
+# total (the volume model always yields at least that many, so the cap governs):
+#
+#   Section 400 — 24 racks × 210 cells, 6,440.8 m³, 72.9% eff → 193,991 boxes
+#   Section 600 — 6 pallet bays (2 levels), 1,502.9 m³, 73.4% eff → 538 pallets
+#   Section 300 — 77 racks, 1,160 cells, 1,134.7 m³ → 7,512 boxes
+#                 (integer-fit of the 60×40×35 cm rep box, same method as 200)
+#   Section 200 — 16 std racks + 13 columns, 346 cells → 3,304 boxes
+#                 (audited; loose single column still excluded — TBD)
+#   Packout (100) — no capacity workbook provided; values remain estimates.
 # ---------------------------------------------------------------------------
 DEFAULT_AREAS: List[StorageArea] = [
     StorageArea(
+        # 6 pallet bays, lower + upper level; 121.92×101.6×160 cm rep pallet
         id="zone600", name="600 – Paper", zone="600",
-        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
-        num_racks=56, efficiency=0.70,
-        box_length_cuft=1.5, box_depth_cuft=1.5, box_height_cuft=2.2, units_per_box=24.0,
+        rack_length_cuft=98.739, rack_depth_cuft=4.757, rack_height_cuft=18.832,
+        num_racks=6, efficiency=0.734,
+        box_length_cuft=4.0, box_depth_cuft=3.333, box_height_cuft=5.249, units_per_box=60.0,
+        max_concurrent_boxes=538,
     ),
     StorageArea(
+        # 24 racks × 210 cells (274×44×106 cm); ~38.49 boxes/cell (40×30×20 cm rep box)
         id="zone400", name="400 – Consumables", zone="400",
-        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
-        num_racks=44, efficiency=0.75,
-        box_length_cuft=1.2, box_depth_cuft=1.2, box_height_cuft=2.4, units_per_box=12.0,
+        rack_length_cuft=188.780, rack_depth_cuft=3.478, rack_height_cuft=14.436,
+        num_racks=24, efficiency=0.729,
+        box_length_cuft=1.312, box_depth_cuft=0.984, box_height_cuft=0.656, units_per_box=12.0,
+        max_concurrent_boxes=193991,
     ),
     StorageArea(
+        # 77 racks / 1,160 cells; 60×40×35 cm rep box (51-box sample)
         id="zone300", name="300 – Customer Specific 1", zone="300",
-        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
-        num_racks=28, efficiency=0.80,
-        box_length_cuft=1.0, box_depth_cuft=1.0, box_height_cuft=2.5, units_per_box=8.0,
+        rack_length_cuft=36.474, rack_depth_cuft=1.804, rack_height_cuft=7.907,
+        num_racks=77, efficiency=0.58,
+        box_length_cuft=1.969, box_depth_cuft=1.312, box_height_cuft=1.148, units_per_box=8.0,
+        max_concurrent_boxes=7512,
     ),
     StorageArea(
+        # Group A (16 racks×5 cols) + Group B (13 columns); 346 cells; 60×40×35 cm rep box
         id="zone200", name="200 – Customer Specific 2", zone="200",
-        rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=8.0,
-        num_racks=28, efficiency=0.80,
-        box_length_cuft=1.0, box_depth_cuft=1.0, box_height_cuft=2.5, units_per_box=8.0,
+        rack_length_cuft=46.531, rack_depth_cuft=3.478, rack_height_cuft=7.710,
+        num_racks=16, efficiency=0.55,
+        box_length_cuft=1.969, box_depth_cuft=1.312, box_height_cuft=1.148, units_per_box=8.0,
+        max_concurrent_boxes=3304,
     ),
     StorageArea(
+        # No capacity workbook for final assembly — estimates, volume-based (no cap)
         id="packout", name="Packout – Final Assembly", zone="100",
         rack_length_cuft=4.0, rack_depth_cuft=2.0, rack_height_cuft=6.0,
         num_racks=19, efficiency=0.85,
@@ -195,28 +218,85 @@ DEFAULT_AREAS: List[StorageArea] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Default order types
+# Default order types — calibrated from the Value Stream Analysis workbook
+# (Sales_Order_Data: 228,396 orders across a 44-day span).
+#
+#   daily_volume        = distinct orders of that type ÷ 44 days
+#   avg_units_per_order = total inventory qty ÷ distinct orders
+#   storage_split       = Paper Goods (Toilet+Towels) qty → 600, remainder → 400
+#   kitting_split       = "Kitted …" category qty → kitting, remainder → packout
+#   customer_split      = 300 vs 200 assumption — the sales data has no customer
+#                         dimension, so a nominal 60/40 is kept for every type.
 # ---------------------------------------------------------------------------
 DEFAULT_ORDER_TYPES: List[OrderType] = [
     OrderType(
-        id="SO", name="SO – Standard Order",
-        daily_volume=120, avg_units_per_order=50,
-        storage_split=StorageSplit(paper_pct=40.0, consumable_pct=60.0),
+        id="SO", name="SO – Sales Order",
+        daily_volume=3321, avg_units_per_order=11,
+        storage_split=StorageSplit(paper_pct=37.8, consumable_pct=62.2),
         customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
-        kitting_split=KittingSplit(packout_pct=70.0, kitting_pct=30.0),
+        kitting_split=KittingSplit(packout_pct=84.2, kitting_pct=15.8),
     ),
     OrderType(
-        id="SW", name="SW – Special Warehouse",
-        daily_volume=40, avg_units_per_order=35,
-        storage_split=StorageSplit(paper_pct=20.0, consumable_pct=80.0),
-        customer_split=CustomerSplit(cust1_pct=50.0, cust2_pct=50.0),
-        kitting_split=KittingSplit(packout_pct=50.0, kitting_pct=50.0),
+        id="BE", name="BE – Order type BE",
+        daily_volume=1626, avg_units_per_order=6,
+        storage_split=StorageSplit(paper_pct=30.2, consumable_pct=69.8),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=77.0, kitting_pct=23.0),
     ),
     OrderType(
-        id="BW", name="BW – Bulk Warehouse",
-        daily_volume=25, avg_units_per_order=120,
-        storage_split=StorageSplit(paper_pct=60.0, consumable_pct=40.0),
-        customer_split=CustomerSplit(cust1_pct=70.0, cust2_pct=30.0),
+        id="SW", name="SW – Order type SW",
+        daily_volume=198, avg_units_per_order=6,
+        storage_split=StorageSplit(paper_pct=32.2, consumable_pct=67.8),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=82.4, kitting_pct=17.6),
+    ),
+    OrderType(
+        id="DR", name="DR – Order type DR",
+        daily_volume=17, avg_units_per_order=112,
+        storage_split=StorageSplit(paper_pct=37.1, consumable_pct=62.9),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=78.1, kitting_pct=21.9),
+    ),
+    OrderType(
+        id="CX", name="CX – Order type CX",
+        daily_volume=16, avg_units_per_order=129,
+        storage_split=StorageSplit(paper_pct=8.3, consumable_pct=91.7),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=68.0, kitting_pct=32.0),
+    ),
+    OrderType(
+        id="BW", name="BW – Order type BW",
+        daily_volume=6, avg_units_per_order=3,
+        storage_split=StorageSplit(paper_pct=3.7, consumable_pct=96.3),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=3.7, kitting_pct=96.3),
+    ),
+    OrderType(
+        id="SB", name="SB – Order type SB",
+        daily_volume=4, avg_units_per_order=2,
+        storage_split=StorageSplit(paper_pct=0.0, consumable_pct=100.0),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=3.8, kitting_pct=96.2),
+    ),
+    OrderType(
+        id="SR", name="SR – Order type SR",
+        daily_volume=2, avg_units_per_order=6,
+        storage_split=StorageSplit(paper_pct=10.3, consumable_pct=89.7),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=42.5, kitting_pct=57.5),
+    ),
+    OrderType(
+        id="SS", name="SS – Order type SS",
+        daily_volume=1, avg_units_per_order=3,
+        storage_split=StorageSplit(paper_pct=2.8, consumable_pct=97.2),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
         kitting_split=KittingSplit(packout_pct=80.0, kitting_pct=20.0),
+    ),
+    OrderType(
+        id="LR", name="LR – Order type LR",
+        daily_volume=1, avg_units_per_order=3,
+        storage_split=StorageSplit(paper_pct=0.0, consumable_pct=100.0),
+        customer_split=CustomerSplit(cust1_pct=60.0, cust2_pct=40.0),
+        kitting_split=KittingSplit(packout_pct=100.0, kitting_pct=0.0),
     ),
 ]
