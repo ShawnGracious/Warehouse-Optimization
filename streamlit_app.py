@@ -686,7 +686,7 @@ if page == "🏭 Material flow":
             bordercolor="#2e3250", borderwidth=1)
 
         fig.update_layout(
-            height=540,
+            height=480,
             margin=dict(l=10, r=10, t=20, b=10),
             paper_bgcolor="#0f1117",
             plot_bgcolor="#0f1117",
@@ -711,8 +711,9 @@ if page == "🏭 Material flow":
     c4.metric("Consumables to Zn 200",   str(int(fl.consumables_to_200))   + " boxes/day")
 
     st.markdown("#### Per order type")
+    st.caption("Expand any order type to see its splits.")
     for ot in engine.order_types:
-        with st.expander("**" + ot.name + "**", expanded=True):
+        with st.expander("**" + ot.name + "**", expanded=False):
             r1, r2, r3 = st.columns(3)
             r1.metric("Daily orders",    ot.daily_volume)
             r2.metric("Avg units/order", ot.avg_units_per_order)
@@ -738,9 +739,8 @@ if page == "🏭 Material flow":
             )
             s3c.metric("Kitting boxes/day", str(round(kit_boxes, 1)))
 
-    st.markdown("---")
-    st.markdown("#### Flow rules reference")
-    st.markdown("""
+    with st.expander("📋 Flow rules reference", expanded=False):
+        st.markdown("""
 | Rule | Logic |
 |---|---|
 | **Split 1 - Storage** | 600% + 400% = 100% — where the order draws its units from |
@@ -749,7 +749,7 @@ if page == "🏭 Material flow":
 | **Split 3 - Kitting** | Packout% + Kitting% = 100% — how 300/200 material routes onward |
 | **Rule 4 - Kitting loop** | Kitting returns to same zone (300 or 200) then flows to 100 normally |
 | **Rule 5 - Final** | All paths converge at 100 Final/Packout before shipping |
-    """)
+        """)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1342,7 +1342,7 @@ elif page == "📦 Analysis":
                 + str(int(a.load_boxes)) + "/" + str(a.capacity_boxes) + " boxes" + cap_tag + "  |  "
                 + str(int(a.load_units)) + "/" + str(a.capacity_units) + " units  |  "
                 + str(int(a.area.units_per_box)) + " u/box  " + status_label(a.utilization_pct),
-                expanded=True):
+                expanded=False):
                 st.progress(min(a.utilization_pct / 100, 1.0))
                 if a.contributing_orders:
                     rows = []
