@@ -77,6 +77,28 @@ hr { margin: .35rem 0 !important; }
 /* sidebar padding */
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .35rem !important; }
 [data-testid="stSidebar"] .block-container { padding-top: 1rem !important; }
+
+/* ── visual polish: consistent grouping, hierarchy, accents ── */
+/* KPI metrics read as a row of aligned cards */
+[data-testid="stMetric"] {
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+}
+[data-testid="stMetricValue"] { font-weight: 700 !important; }
+[data-testid="stMetricLabel"] { opacity: .72; }
+/* bordered containers (getting-started, groups) softer + consistent */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 10px !important;
+    border-color: rgba(255,255,255,.08) !important;
+}
+/* active tab gets the brand accent */
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] { color: #8ea2ff !important; }
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] { background-color: #4f6ef7 !important; }
+/* subheaders: subtle accent underline for clearer hierarchy */
+h3 { border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: .12rem !important; }
+/* expander header hover affordance */
+[data-testid="stExpander"] summary:hover { color: #8ea2ff !important; }
 </style>
 """, unsafe_allow_html=True)
 
